@@ -10,7 +10,7 @@ from fluxion.transformer.attention import (
     ScaledDotProductAttention,
     SelfAttention,
 )
-from fluxion.nn.layers import Linear, ReLU, Sigmoid, Softmax, LayerNorm, Embedding
+from fluxion.nn.layers import Linear, NativeLinear, ReLU, Sigmoid, Softmax, LayerNorm, Embedding
 from fluxion.nn.losses import MSELoss, CrossEntropyLoss
 from fluxion.nn.module import Sequential
 from fluxion.tensor import Tensor
@@ -1510,4 +1510,85 @@ def test_language_model_cross_entropy_matches_pytorch():
         torch_logits.grad.numpy(),
         rtol=1e-6,
         atol=1e-7,
+    )
+
+def test_native_linear_matches_linear_forward_and_backward():
+    np.random.seed(0)
+
+    batch_size = 4
+    input_dim = 3
+    output_dim = 5
+
+    x_data = np.random.randn(
+        batch_size,
+        input_dim,
+    )
+
+    weight_data = np.random.randn(
+        input_dim,
+        output_dim,
+    )
+
+    bias_data = np.random.randn(
+        output_dim,
+    )
+
+    x_regular = Tensor(
+        x_data.copy(),
+        requires_grad=True,
+    )
+
+    x_native = Tensor(
+        x_data.copy(),
+        requires_grad=True,
+    )
+
+    regular = Linear(
+        input_dim,
+        output_dim,
+    )
+
+    native = NativeLinear(
+        input_dim,
+        output_dim,
+    )
+
+    regular.weight.data = weight_data.copy()
+    regular.bias.data = bias_data.copy()
+
+    native.weight.data = weight_data.copy()
+    native.bias.data = bias_data.copy()
+
+    regular_output = regular(
+        x_regular
+    )
+
+    native_output = native(
+        x_native
+    )
+
+    assert np.allclose(
+        regular_output.data,
+        native_output.data,
+    )
+
+    regular_loss = regular_output.sum()
+    native_loss = native_output.sum()
+
+    regular_loss.backward()
+    native_loss.backward()
+
+    assert np.allclose(
+        x_regular.grad,
+        x_native.grad,
+    )
+
+    assert np.allclose(
+        regular.weight.grad,
+        native.weight.grad,
+    )
+
+    assert np.allclose(
+        regular.bias.grad,
+        native.bias.grad,
     )

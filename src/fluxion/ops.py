@@ -713,3 +713,118 @@ def permute(
 
     out._backward = _backward
     return out
+
+def native_linear(
+    x: Tensor,
+    weight: Tensor,
+    bias: Tensor,
+) -> Tensor:
+    """
+    Fused Linear operation backed by the native C++ extension.
+
+    Computes:
+
+        output = x @ weight + bias
+
+    Backward computes:
+
+        dX = grad_output @ weight.T
+        dW = x.T @ grad_output
+        db = sum(grad_output, axis=0)
+    """
+
+    try:
+        import fluxion_native
+    except ImportError as exc:
+        raise RuntimeError(
+            "Fluxion native extension is not available. "
+            "Compile fluxion_native before using native_linear."
+        ) from exc
+
+    if x.ndim != 2:
+        raise ValueError(
+            "native_linear expects x to be 2D."
+        )
+
+    if weight.ndim != 2:
+        raise ValueError(
+            "native_linear expects weight to be 2D."
+        )
+
+    if bias.ndim != 1:
+        raise ValueError(
+            "native_linear expects bias to be 1D."
+        )
+
+    if x.shape[1] != weight.shape[0]:
+        raise ValueError(
+            "x and weight dimensions are incompatible."
+        )
+
+    if bias.shape[0] != weight.shape[1]:
+        raise ValueError(
+            "bias size must match output dimension."
+        )
+
+    output_data = fluxion_native.linear_forward(
+        x.data,
+        weight.data,
+        bias.data,
+    )
+
+    out = Tensor(
+        output_data,
+        requires_grad=(
+            x.requires_grad
+            or weight.requires_grad
+            or bias.requires_grad
+        ),
+    )
+
+    out._prev = (
+        x,
+        weight,
+        bias,
+    )
+
+    out._op = "native_linear"
+
+    def _backward() -> None:
+        if out.grad is None:
+            return
+
+        grad_x, grad_weight, grad_bias = (
+            fluxion_native.linear_backward(
+                out.grad,
+                x.data,
+                weight.data,
+            )
+        )
+
+        if x.requires_grad:
+            if x.grad is None:
+                x.grad = np.zeros_like(
+                    x.data
+                )
+
+            x.grad += grad_x
+
+        if weight.requires_grad:
+            if weight.grad is None:
+                weight.grad = np.zeros_like(
+                    weight.data
+                )
+
+            weight.grad += grad_weight
+
+        if bias.requires_grad:
+            if bias.grad is None:
+                bias.grad = np.zeros_like(
+                    bias.data
+                )
+
+            bias.grad += grad_bias
+
+    out._backward = _backward
+
+    return out

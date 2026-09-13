@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import statistics
 import time
+from collections.abc import Callable
 
 import numpy as np
 
@@ -9,131 +11,187 @@ from fluxion.optim.adam import Adam
 from fluxion.transformer.gpt import GPT
 
 
-def benchmark(
-    name: str,
-    function,
-    iterations: int,
-) -> None:
-    times = []
+VOCAB_SIZE = 32
+SEQUENCE_LENGTH = 16
+BATCH_SIZE = 8
+EMBED_DIM = 16
+NUM_HEADS = 4
+HIDDEN_DIM = 32
+NUM_LAYERS = 2
 
-    for _ in range(iterations):
-        start = time.perf_counter()
+WARMUP_STEPS = 20
+MEASURED_STEPS = 200
+
+
+def measure(
+    function: Callable[[], None],
+) -> dict[str, float]:
+    """
+    Measure one operation many times and summarize the timing distribution.
+    """
+
+    for _ in range(WARMUP_STEPS):
+        function()
+
+    timings_ms: list[float] = []
+
+    for _ in range(MEASURED_STEPS):
+        start_time = time.perf_counter()
 
         function()
 
-        end = time.perf_counter()
+        end_time = time.perf_counter()
 
-        times.append(
-            end - start
+        elapsed_ms = (
+            end_time - start_time
+        ) * 1000.0
+
+        timings_ms.append(
+            elapsed_ms
         )
 
-    average = sum(times) / len(times)
+    return {
+        "mean": statistics.mean(
+            timings_ms
+        ),
+        "median": statistics.median(
+            timings_ms
+        ),
+        "std": statistics.stdev(
+            timings_ms
+        ),
+        "min": min(
+            timings_ms
+        ),
+    }
+
+
+def print_result(
+    name: str,
+    result: dict[str, float],
+) -> None:
+    print(
+        f"{name:<20} | "
+        f"median {result['median']:>8.3f} ms | "
+        f"mean {result['mean']:>8.3f} ms | "
+        f"std {result['std']:>8.3f} ms | "
+        f"min {result['min']:>8.3f} ms"
+    )
+
+
+def main() -> None:
+    np.random.seed(0)
+
+    model = GPT(
+        vocab_size=VOCAB_SIZE,
+        max_sequence_length=SEQUENCE_LENGTH,
+        embed_dim=EMBED_DIM,
+        num_heads=NUM_HEADS,
+        hidden_dim=HIDDEN_DIM,
+        num_layers=NUM_LAYERS,
+    )
+
+    loss_function = CrossEntropyLoss()
+
+    optimizer = Adam(
+        model.parameters(),
+        lr=0.001,
+    )
+
+    token_ids = np.random.randint(
+        0,
+        VOCAB_SIZE,
+        size=(
+            BATCH_SIZE,
+            SEQUENCE_LENGTH,
+        ),
+    )
+
+    targets = np.random.randint(
+        0,
+        VOCAB_SIZE,
+        size=(
+            BATCH_SIZE,
+            SEQUENCE_LENGTH,
+        ),
+    )
+
+    def forward_pass() -> None:
+        model(
+            token_ids
+        )
+
+    def forward_backward() -> None:
+        optimizer.zero_grad()
+
+        logits = model(
+            token_ids
+        )
+
+        loss = loss_function(
+            logits,
+            targets,
+        )
+
+        loss.backward()
+
+    def full_training_step() -> None:
+        optimizer.zero_grad()
+
+        logits = model(
+            token_ids
+        )
+
+        loss = loss_function(
+            logits,
+            targets,
+        )
+
+        loss.backward()
+
+        optimizer.step()
 
     print(
-        f"{name:<20} "
-        f"{average * 1000:.3f} ms"
+        "Fluxion GPT Benchmark"
+    )
+    print(
+        "====================="
+    )
+    print(
+        f"Warmup steps:   {WARMUP_STEPS}"
+    )
+    print(
+        f"Measured steps: {MEASURED_STEPS}"
+    )
+    print()
+
+    forward_result = measure(
+        forward_pass
+    )
+
+    backward_result = measure(
+        forward_backward
+    )
+
+    training_result = measure(
+        full_training_step
+    )
+
+    print_result(
+        "Forward",
+        forward_result,
+    )
+
+    print_result(
+        "Forward + backward",
+        backward_result,
+    )
+
+    print_result(
+        "Training step",
+        training_result,
     )
 
 
-np.random.seed(42)
-
-vocab_size = 32
-sequence_length = 16
-batch_size = 8
-
-model = GPT(
-    vocab_size=vocab_size,
-    max_sequence_length=sequence_length,
-    embed_dim=16,
-    num_heads=4,
-    hidden_dim=32,
-    num_layers=2,
-)
-
-criterion = CrossEntropyLoss()
-
-optimizer = Adam(
-    model.parameters(),
-    lr=0.001,
-)
-
-inputs = np.random.randint(
-    0,
-    vocab_size,
-    size=(
-        batch_size,
-        sequence_length,
-    ),
-    dtype=np.int64,
-)
-
-targets = np.random.randint(
-    0,
-    vocab_size,
-    size=(
-        batch_size,
-        sequence_length,
-    ),
-    dtype=np.int64,
-)
-
-
-def forward_pass():
-    model(inputs)
-
-
-def backward_pass():
-    optimizer.zero_grad()
-
-    logits = model(inputs)
-
-    loss = criterion(
-        logits,
-        targets,
-    )
-
-    loss.backward()
-
-
-def training_step():
-    optimizer.zero_grad()
-
-    logits = model(inputs)
-
-    loss = criterion(
-        logits,
-        targets,
-    )
-
-    loss.backward()
-
-    optimizer.step()
-
-
-print()
-print("Fluxion GPT Baseline Benchmark")
-print("------------------------------")
-
-# Warm-up runs
-for _ in range(3):
-    training_step()
-
-benchmark(
-    "Forward pass:",
-    forward_pass,
-    iterations=20,
-)
-
-benchmark(
-    "Forward + backward:",
-    backward_pass,
-    iterations=20,
-)
-
-benchmark(
-    "Full training step:",
-    training_step,
-    iterations=20,
-)
-
-print()
+if __name__ == "__main__":
+    main()

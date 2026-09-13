@@ -25,4 +25,5 @@ checkpoints/
 *.ckpt
 
 # Benchmark outputs
-benchmarks/results/
+benchmarks/results/*.so
+fluxion_native*.so

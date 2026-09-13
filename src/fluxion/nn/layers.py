@@ -217,3 +217,52 @@ class Embedding(Module):
         return self.weight[
             indices
         ]
+
+class NativeLinear(Module):
+    """
+    Linear layer backed by Fluxion's fused native C++ operator.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+    ) -> None:
+        if input_dim <= 0:
+            raise ValueError(
+                "input_dim must be positive."
+            )
+
+        if output_dim <= 0:
+            raise ValueError(
+                "output_dim must be positive."
+            )
+
+        scale = 1.0 / np.sqrt(input_dim)
+
+        self.weight = Tensor(
+            np.random.randn(
+                input_dim,
+                output_dim,
+            ) * scale,
+            requires_grad=True,
+        )
+
+        self.bias = Tensor(
+            np.zeros(
+                output_dim,
+            ),
+            requires_grad=True,
+        )
+
+    def forward(
+        self,
+        x: Tensor,
+    ) -> Tensor:
+        from fluxion.ops import native_linear
+
+        return native_linear(
+            x,
+            self.weight,
+            self.bias,
+        )
