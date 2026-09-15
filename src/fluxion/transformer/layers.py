@@ -6,6 +6,7 @@ from fluxion.nn.layers import (
     Embedding,
     LayerNorm,
     Linear,
+    NativeLinear,
     ReLU,
 )
 from fluxion.nn.module import Module, Sequential
@@ -71,6 +72,8 @@ class TransformerBlock(Module):
         embed_dim: int,
         num_heads: int,
         hidden_dim: int,
+        *,
+        use_native_linear: bool = False,
     ) -> None:
         if embed_dim <= 0:
             raise ValueError(
@@ -94,19 +97,26 @@ class TransformerBlock(Module):
         self.attention = CausalSelfAttention(
             embed_dim=embed_dim,
             num_heads=num_heads,
+            use_native_linear=use_native_linear,
         )
 
         self.norm2 = LayerNorm(
             embed_dim
         )
 
+        linear_cls = (
+            NativeLinear
+            if use_native_linear
+            else Linear
+        )
+
         self.feed_forward = Sequential(
-            Linear(
+            linear_cls(
                 embed_dim,
                 hidden_dim,
             ),
             ReLU(),
-            Linear(
+            linear_cls(
                 hidden_dim,
                 embed_dim,
             ),

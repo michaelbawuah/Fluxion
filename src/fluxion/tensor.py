@@ -53,6 +53,32 @@ class Tensor:
         """Return the underlying NumPy array."""
         return self.data
 
+    def _accumulate_grad(self, gradient: np.ndarray) -> None:
+        """
+        Accumulate a gradient contribution into this tensor.
+
+        The first contribution is copied directly into the gradient buffer.
+        Later contributions are accumulated in place.
+        """
+        if not self.requires_grad:
+            return
+
+        gradient = np.asarray(
+            gradient,
+            dtype=self.data.dtype,
+        )
+
+        if gradient.shape != self.data.shape:
+            raise ValueError(
+                f"Gradient shape {gradient.shape} does not match "
+                f"tensor shape {self.data.shape}."
+            )
+
+        if self.grad is None:
+            self.grad = gradient.copy()
+        else:
+            self.grad += gradient
+
     def backward(self, gradient: Any | None = None) -> None:
         """
         Compute gradients for every tensor that contributed to this tensor.
@@ -73,7 +99,10 @@ class Tensor:
 
             initial_grad = np.ones_like(self.data)
         else:
-            initial_grad = np.asarray(gradient, dtype=self.data.dtype)
+            initial_grad = np.asarray(
+                gradient,
+                dtype=self.data.dtype,
+            )
 
             if initial_grad.shape != self.data.shape:
                 raise ValueError(
@@ -99,6 +128,9 @@ class Tensor:
 
         return add(self, other)
 
+    def __radd__(self, other: Any) -> "Tensor":
+        return self + other
+
     def __mul__(self, other: Any) -> "Tensor":
         from fluxion.ops import multiply
 
@@ -106,6 +138,9 @@ class Tensor:
             other = Tensor(other)
 
         return multiply(self, other)
+
+    def __rmul__(self, other: Any) -> "Tensor":
+        return self * other
 
     def __neg__(self) -> "Tensor":
         from fluxion.ops import negate
@@ -120,23 +155,11 @@ class Tensor:
 
         return subtract(self, other)
 
-    def __radd__(self, other: Any) -> "Tensor":
-        return self + other
-
     def __rsub__(self, other: Any) -> "Tensor":
         if not isinstance(other, Tensor):
-           other = Tensor(other)
+            other = Tensor(other)
 
         return other - self
-
-    def __rmul__(self, other: Any) -> "Tensor":
-        return self * other
-
-    def __rtruediv__(self, other: Any) -> "Tensor":
-        if not isinstance(other, Tensor):
-           other = Tensor(other)
-
-        return other / self
 
     def __truediv__(self, other: Any) -> "Tensor":
         from fluxion.ops import divide
@@ -145,6 +168,12 @@ class Tensor:
             other = Tensor(other)
 
         return divide(self, other)
+
+    def __rtruediv__(self, other: Any) -> "Tensor":
+        if not isinstance(other, Tensor):
+            other = Tensor(other)
+
+        return other / self
 
     def __pow__(self, exponent: float | int) -> "Tensor":
         from fluxion.ops import power
@@ -167,10 +196,10 @@ class Tensor:
         from fluxion.ops import sum_tensor
 
         return sum_tensor(
-        self,
-        axis=axis,
-        keepdims=keepdims,
-    )
+            self,
+            axis=axis,
+            keepdims=keepdims,
+        )
 
     def mean(
         self,
@@ -180,23 +209,23 @@ class Tensor:
         from fluxion.ops import mean_tensor
 
         return mean_tensor(
-        self,
-        axis=axis,
-        keepdims=keepdims,
-    )
+            self,
+            axis=axis,
+            keepdims=keepdims,
+        )
 
     def max(
-    self,
-    axis: int | tuple[int, ...] | None = None,
-    keepdims: bool = False,
-    ) -> "Tensor":
-     from fluxion.ops import max_tensor
-
-     return max_tensor(
         self,
-        axis=axis,
-        keepdims=keepdims,
-    )
+        axis: int | tuple[int, ...] | None = None,
+        keepdims: bool = False,
+    ) -> "Tensor":
+        from fluxion.ops import max_tensor
+
+        return max_tensor(
+            self,
+            axis=axis,
+            keepdims=keepdims,
+        )
 
     def exp(self) -> "Tensor":
         from fluxion.ops import exp
@@ -204,18 +233,16 @@ class Tensor:
         return exp(self)
 
     def log(self) -> "Tensor":
-       from fluxion.ops import log
-       return log(self)
+        from fluxion.ops import log
+
+        return log(self)
 
     def sqrt(self) -> "Tensor":
         from fluxion.ops import sqrt
+
         return sqrt(self)
 
-    def __repr__(self) -> str:
-        grad_suffix = ", requires_grad=True" if self.requires_grad else ""
-        return f"Tensor({self.data!r}{grad_suffix})"
-
-    def __getitem__(self, index) -> "Tensor":
+    def __getitem__(self, index: Any) -> "Tensor":
         from fluxion.ops import getitem
 
         return getitem(self, index)
@@ -226,25 +253,29 @@ class Tensor:
         return reshape(self, shape)
 
     def transpose(
-    self,
-    dim0: int,
-    dim1: int,
-) -> "Tensor":
-     from fluxion.ops import transpose
+        self,
+        dim0: int,
+        dim1: int,
+    ) -> "Tensor":
+        from fluxion.ops import transpose
 
-     return transpose(
-         self,
-         dim0,
-         dim1,
-    )
+        return transpose(
+            self,
+            dim0,
+            dim1,
+        )
 
     def permute(
-    self,
-    *dims: int,
-) -> "Tensor":
-     from fluxion.ops import permute
-
-     return permute(
         self,
-        dims,
-    )
+        *dims: int,
+    ) -> "Tensor":
+        from fluxion.ops import permute
+
+        return permute(
+            self,
+            dims,
+        )
+
+    def __repr__(self) -> str:
+        grad_suffix = ", requires_grad=True" if self.requires_grad else ""
+        return f"Tensor({self.data!r}{grad_suffix})"

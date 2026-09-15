@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from fluxion.nn.layers import Embedding, LayerNorm, Linear
+from fluxion.nn.layers import (
+    Embedding,
+    LayerNorm,
+    Linear,
+    NativeLinear,
+)
 from fluxion.nn.module import Module
 from fluxion.tensor import Tensor
 from fluxion.transformer.layers import (
@@ -22,6 +27,8 @@ class GPT(Module):
         num_heads: int,
         hidden_dim: int,
         num_layers: int,
+        *,
+        use_native_linear: bool = False,
     ) -> None:
         if vocab_size <= 0:
             raise ValueError(
@@ -52,6 +59,7 @@ class GPT(Module):
                 embed_dim=embed_dim,
                 num_heads=num_heads,
                 hidden_dim=hidden_dim,
+                use_native_linear=use_native_linear,
             )
             for _ in range(num_layers)
         ]
@@ -60,7 +68,13 @@ class GPT(Module):
             embed_dim
         )
 
-        self.output_projection = Linear(
+        linear_cls = (
+            NativeLinear
+            if use_native_linear
+            else Linear
+        )
+
+        self.output_projection = linear_cls(
             embed_dim,
             vocab_size,
         )

@@ -37,16 +37,46 @@ class Linear(Module):
             if bias
             else None
         )
+    def forward(
+    self,
+    x: Tensor,
+) -> Tensor:
+     from fluxion.ops import native_linear
 
-    def forward(self, x: Tensor) -> Tensor:
-        """Apply the linear transformation y = xW + b."""
+     if x.ndim < 2:
+        raise ValueError(
+            "NativeLinear expects an input with at least 2 dimensions."
+        )
 
-        out = x @ self.weight
+     if x.shape[-1] != self.weight.shape[0]:
+        raise ValueError(
+            "Input feature dimension does not match NativeLinear."
+        )
 
-        if self.bias is not None:
-            out = out + self.bias
+     if x.ndim == 2:
+        return native_linear(
+            x,
+            self.weight,
+            self.bias,
+        )
 
-        return out
+     original_shape = x.shape
+
+     flattened = x.reshape(
+        -1,
+      original_shape[-1],
+    )
+
+     output = native_linear(
+        flattened,
+        self.weight,
+        self.bias,
+    )
+
+     return output.reshape(
+        *original_shape[:-1],
+        self.weight.shape[1],
+    )
 
 
 class ReLU(Module):
@@ -261,8 +291,44 @@ class NativeLinear(Module):
     ) -> Tensor:
         from fluxion.ops import native_linear
 
-        return native_linear(
-            x,
+        if x.ndim < 2:
+            raise ValueError(
+                "NativeLinear expects input with at least 2 dimensions."
+            )
+
+        if x.shape[-1] != self.weight.shape[0]:
+            raise ValueError(
+                "Input feature dimension does not match NativeLinear."
+            )
+
+        # The C++ kernel accepts a 2D matrix.
+        if x.ndim == 2:
+            return native_linear(
+                x,
+                self.weight,
+                self.bias,
+            )
+
+        # Transformer inputs have shape:
+        #
+        #     (batch, sequence, features)
+        #
+        # Flatten every leading dimension into one matrix dimension,
+        # call the 2D native kernel, then restore the original shape.
+        original_shape = x.shape
+
+        flattened = x.reshape(
+            -1,
+            original_shape[-1],
+        )
+
+        output = native_linear(
+            flattened,
             self.weight,
             self.bias,
+        )
+
+        return output.reshape(
+            *original_shape[:-1],
+            self.weight.shape[1],
         )

@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from fluxion.nn.layers import Linear, Softmax
+from fluxion.nn.layers import Linear, NativeLinear, Softmax
 from fluxion.nn.module import Module
 from fluxion.tensor import Tensor
 
@@ -107,6 +107,7 @@ class MultiHeadAttention(Module):
         num_heads: int,
         *,
         causal: bool = False,
+        use_native_linear: bool = False,
     ) -> None:
         if embed_dim <= 0:
             raise ValueError(
@@ -129,22 +130,28 @@ class MultiHeadAttention(Module):
             embed_dim // num_heads
         )
 
-        self.query_projection = Linear(
+        linear_cls = (
+            NativeLinear
+            if use_native_linear
+            else Linear
+        )
+
+        self.query_projection = linear_cls(
             embed_dim,
             embed_dim,
         )
 
-        self.key_projection = Linear(
+        self.key_projection = linear_cls(
             embed_dim,
             embed_dim,
         )
 
-        self.value_projection = Linear(
+        self.value_projection = linear_cls(
             embed_dim,
             embed_dim,
         )
 
-        self.output_projection = Linear(
+        self.output_projection = linear_cls(
             embed_dim,
             embed_dim,
         )
@@ -261,11 +268,14 @@ class SelfAttention(Module):
         self,
         embed_dim: int,
         num_heads: int,
+        *,
+        use_native_linear: bool = False,
     ) -> None:
         self.attention = MultiHeadAttention(
             embed_dim,
             num_heads,
             causal=False,
+            use_native_linear=use_native_linear,
         )
 
     def forward(
@@ -286,11 +296,14 @@ class CausalSelfAttention(Module):
         self,
         embed_dim: int,
         num_heads: int,
+        *,
+        use_native_linear: bool = False,
     ) -> None:
         self.attention = MultiHeadAttention(
             embed_dim,
             num_heads,
             causal=True,
+            use_native_linear=use_native_linear,
         )
 
     def forward(

@@ -28,39 +28,41 @@ def _sum_to_shape(
 
 
 def add(a: Tensor, b: Tensor) -> Tensor:
-    """Elementwise addition."""
+    """Add two tensors with NumPy-style broadcasting."""
+
+    data = a.data + b.data
 
     out = Tensor(
-        a.data + b.data,
+        data,
         requires_grad=a.requires_grad or b.requires_grad,
     )
 
-    out._prev = (a, b)
-    out._op = "add"
+    if out.requires_grad:
+        out._prev = (a, b)
+        out._op = "add"
 
-    def _backward() -> None:
-        if out.grad is None:
-            return
+        def _backward() -> None:
+            if out.grad is None:
+                return
 
-        if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
+            if a.requires_grad:
+                a._accumulate_grad(
+                    _sum_to_shape(
+                        out.grad,
+                        a.shape,
+                    )
+                )
 
-            a.grad += _sum_to_shape(
-                out.grad,
-                a.shape,
-            )
+            if b.requires_grad:
+                b._accumulate_grad(
+                    _sum_to_shape(
+                        out.grad,
+                        b.shape,
+                    )
+                )
 
-        if b.requires_grad:
-            if b.grad is None:
-                b.grad = np.zeros_like(b.data)
+        out._backward = _backward
 
-            b.grad += _sum_to_shape(
-                out.grad,
-                b.shape,
-            )
-
-    out._backward = _backward
     return out
 
 
