@@ -727,7 +727,7 @@ def native_linear(
     except ImportError as exc:
         raise RuntimeError(
             "Fluxion native extension is not available. "
-            "Compile fluxion_native before using native_linear."
+            "Build it with: python native/build_native.py"
         ) from exc
 
     if x.ndim != 2:

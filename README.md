@@ -220,3 +220,48 @@ Fluxion is not intended to claim that a small from-scratch framework outperforms
 - and how profiling evidence should drive optimization decisions.
 
 The project deliberately preserves negative results and benchmark methodology because understanding **why an optimization fails to improve end-to-end performance** is part of systems engineering.
+
+## Portable CPU backend (Milestone B)
+
+The native extension now has a platform boundary instead of hard-coding Apple Accelerate throughout the implementation:
+
+```text
+Fluxion Python
+      |
+      v
+fluxion_native (pybind11 interface)
+      |
+      +-- macOS -> Apple Accelerate / CBLAS
+      |
+      +-- Linux -> CBLAS (OpenBLAS or system BLAS)
+      |
+      +-- NVIDIA CUDA backend -> next stage
+```
+
+Build the CPU extension with the platform-aware build helper:
+
+```bash
+python -m pip install pybind11
+python native/build_native.py
+```
+
+On macOS the build links Apple Accelerate. On Linux it prefers OpenBLAS when available and otherwise uses the system BLAS library. The compiled extension exposes backend metadata so benchmark logs can identify the implementation being measured:
+
+```python
+from fluxion.native import backend_name, build_info
+
+print(backend_name())
+print(build_info())
+```
+
+For Ubuntu/AWS Linux development, install a compiler and OpenBLAS headers before building, for example:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential libopenblas-dev python3-dev
+python -m pip install pybind11
+python native/build_native.py
+PYTHONPATH=. python -m pytest -q
+```
+
+This portability layer is intentionally completed before CUDA work so CPU and GPU backends can share a stable Python-facing boundary while retaining platform-specific implementations underneath.
