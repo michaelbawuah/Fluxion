@@ -97,6 +97,69 @@ def test_linear_backward():
     assert layer.bias.grad.shape == layer.bias.shape
 
 
+
+def test_regular_and_native_linear_are_distinct_and_match():
+    regular = Linear(3, 2)
+    native = NativeLinear(3, 2)
+
+    weight = np.array(
+        [
+            [1.0, 2.0],
+            [3.0, 4.0],
+            [5.0, 6.0],
+        ]
+    )
+    bias = np.array([1.0, -1.0])
+
+    regular.weight.data[:] = weight
+    regular.bias.data[:] = bias
+    native.weight.data[:] = weight
+    native.bias.data[:] = bias
+
+    regular_x = Tensor(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+        requires_grad=True,
+    )
+    native_x = Tensor(
+        regular_x.data.copy(),
+        requires_grad=True,
+    )
+
+    regular_y = regular(regular_x)
+    native_y = native(native_x)
+
+    assert regular_y._op != "native_linear"
+    assert native_y._op == "native_linear"
+
+    np.testing.assert_allclose(
+        regular_y.data,
+        native_y.data,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+    regular_y.sum().backward()
+    native_y.sum().backward()
+
+    np.testing.assert_allclose(
+        regular_x.grad,
+        native_x.grad,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        regular.weight.grad,
+        native.weight.grad,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        regular.bias.grad,
+        native.bias.grad,
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
 def test_zero_grad():
     layer = Linear(3, 2)
 

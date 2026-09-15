@@ -82,28 +82,27 @@ def multiply(a: Tensor, b: Tensor) -> Tensor:
             return
 
         if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
             grad_a = b.data * out.grad
 
-            a.grad += _sum_to_shape(
-                grad_a,
-                a.shape,
+            a._accumulate_grad(
+                _sum_to_shape(
+                    grad_a,
+                    a.shape,
+                )
             )
 
         if b.requires_grad:
-            if b.grad is None:
-                b.grad = np.zeros_like(b.data)
-
             grad_b = a.data * out.grad
 
-            b.grad += _sum_to_shape(
-                grad_b,
-                b.shape,
+            b._accumulate_grad(
+                _sum_to_shape(
+                    grad_b,
+                    b.shape,
+                )
             )
 
     out._backward = _backward
+
     return out
 
 
@@ -123,12 +122,10 @@ def negate(a: Tensor) -> Tensor:
             return
 
         if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
-            a.grad += -out.grad
+            a._accumulate_grad(-out.grad)
 
     out._backward = _backward
+
     return out
 
 
@@ -166,16 +163,16 @@ def power(a: Tensor, exponent: float) -> Tensor:
             return
 
         if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
-            a.grad += (
+            grad_a = (
                 exponent
                 * (a.data ** (exponent - 1))
                 * out.grad
             )
 
+            a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
 
 
@@ -203,37 +200,39 @@ def sum_tensor(
         if out.grad is None:
             return
 
-        if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
+        if not a.requires_grad:
+            return
 
-            grad = out.grad
+        grad = out.grad
 
-            if axis is not None:
-                axes = (
-                    (axis,)
-                    if isinstance(axis, int)
-                    else axis
-                )
-
-                axes = tuple(
-                    ax % a.ndim
-                    for ax in axes
-                )
-
-                if not keepdims:
-                    for ax in sorted(axes):
-                        grad = np.expand_dims(
-                            grad,
-                            axis=ax,
-                        )
-
-            a.grad += np.broadcast_to(
-                grad,
-                a.shape,
+        if axis is not None:
+            axes = (
+                (axis,)
+                if isinstance(axis, int)
+                else axis
             )
 
+            axes = tuple(
+                ax % a.ndim
+                for ax in axes
+            )
+
+            if not keepdims:
+                for ax in sorted(axes):
+                    grad = np.expand_dims(
+                        grad,
+                        axis=ax,
+                    )
+
+        grad_a = np.broadcast_to(
+            grad,
+            a.shape,
+        )
+
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
 
 
@@ -261,52 +260,54 @@ def mean_tensor(
         if out.grad is None:
             return
 
-        if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
+        if not a.requires_grad:
+            return
 
-            grad = out.grad
+        grad = out.grad
 
-            if axis is None:
-                divisor = a.size
+        if axis is None:
+            divisor = a.size
 
-            else:
-                axes = (
-                    (axis,)
-                    if isinstance(axis, int)
-                    else axis
-                )
-
-                axes = tuple(
-                    ax % a.ndim
-                    for ax in axes
-                )
-
-                divisor = int(
-                    np.prod(
-                        [
-                            a.shape[ax]
-                            for ax in axes
-                        ]
-                    )
-                )
-
-                if not keepdims:
-                    for ax in sorted(axes):
-                        grad = np.expand_dims(
-                            grad,
-                            axis=ax,
-                        )
-
-            a.grad += (
-                np.broadcast_to(
-                    grad,
-                    a.shape,
-                )
-                / divisor
+        else:
+            axes = (
+                (axis,)
+                if isinstance(axis, int)
+                else axis
             )
 
+            axes = tuple(
+                ax % a.ndim
+                for ax in axes
+            )
+
+            divisor = int(
+                np.prod(
+                    [
+                        a.shape[ax]
+                        for ax in axes
+                    ]
+                )
+            )
+
+            if not keepdims:
+                for ax in sorted(axes):
+                    grad = np.expand_dims(
+                        grad,
+                        axis=ax,
+                    )
+
+        grad_a = (
+            np.broadcast_to(
+                grad,
+                a.shape,
+            )
+            / divisor
+        )
+
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
 
 
@@ -340,9 +341,6 @@ def matmul(a: Tensor, b: Tensor) -> Tensor:
             return
 
         if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
             grad_a = np.matmul(
                 out.grad,
                 np.swapaxes(
@@ -352,15 +350,14 @@ def matmul(a: Tensor, b: Tensor) -> Tensor:
                 ),
             )
 
-            a.grad += _sum_to_shape(
-                grad_a,
-                a.shape,
+            a._accumulate_grad(
+                _sum_to_shape(
+                    grad_a,
+                    a.shape,
+                )
             )
 
         if b.requires_grad:
-            if b.grad is None:
-                b.grad = np.zeros_like(b.data)
-
             grad_b = np.matmul(
                 np.swapaxes(
                     a.data,
@@ -370,34 +367,15 @@ def matmul(a: Tensor, b: Tensor) -> Tensor:
                 out.grad,
             )
 
-            b.grad += _sum_to_shape(
-                grad_b,
-                b.shape,
+            b._accumulate_grad(
+                _sum_to_shape(
+                    grad_b,
+                    b.shape,
+                )
             )
 
     out._backward = _backward
-    return out
 
-
-
-
-    def _backward() -> None:
-        if out.grad is None:
-            return
-
-        if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
-            a.grad += out.grad @ b.data.T
-
-        if b.requires_grad:
-            if b.grad is None:
-                b.grad = np.zeros_like(b.data)
-
-            b.grad += a.data.T @ out.grad
-
-    out._backward = _backward
     return out
 
 
@@ -417,12 +395,12 @@ def exp(a: Tensor) -> Tensor:
             return
 
         if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
-            a.grad += out.data * out.grad
+            a._accumulate_grad(
+                out.data * out.grad
+            )
 
     out._backward = _backward
+
     return out
 
 
@@ -442,13 +420,14 @@ def log(a: Tensor) -> Tensor:
             return
 
         if a.requires_grad:
-            if a.grad is None:
-                a.grad = np.zeros_like(a.data)
-
-            a.grad += out.grad / a.data
+            a._accumulate_grad(
+                out.grad / a.data
+            )
 
     out._backward = _backward
+
     return out
+
 
 def max_tensor(
     a: Tensor,
@@ -477,22 +456,19 @@ def max_tensor(
         if not a.requires_grad:
             return
 
-        if a.grad is None:
-            a.grad = np.zeros_like(a.data)
-
         if axis is None:
             max_value = a.data.max()
 
             mask = a.data == max_value
-
             number_of_maxima = mask.sum()
 
-            a.grad += (
+            grad_a = (
                 mask
                 * out.grad
                 / number_of_maxima
             )
 
+            a._accumulate_grad(grad_a)
             return
 
         axes = (
@@ -527,14 +503,18 @@ def max_tensor(
                     axis=ax,
                 )
 
-        a.grad += (
+        grad_a = (
             mask
             * grad
             / number_of_maxima
         )
 
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
+
 
 def getitem(a: Tensor, index) -> Tensor:
     """Index into a tensor while preserving autograd."""
@@ -554,17 +534,20 @@ def getitem(a: Tensor, index) -> Tensor:
         if not a.requires_grad:
             return
 
-        if a.grad is None:
-            a.grad = np.zeros_like(a.data)
+        grad_a = np.zeros_like(a.data)
 
         np.add.at(
-            a.grad,
+            grad_a,
             index,
             out.grad,
         )
 
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
+
 
 def reshape(
     a: Tensor,
@@ -587,13 +570,14 @@ def reshape(
         if not a.requires_grad:
             return
 
-        if a.grad is None:
-            a.grad = np.zeros_like(a.data)
-
-        a.grad += out.grad.reshape(a.shape)
+        a._accumulate_grad(
+            out.grad.reshape(a.shape)
+        )
 
     out._backward = _backward
+
     return out
+
 
 def sqrt(a: Tensor) -> Tensor:
     """Elementwise square root."""
@@ -613,16 +597,17 @@ def sqrt(a: Tensor) -> Tensor:
         if not a.requires_grad:
             return
 
-        if a.grad is None:
-            a.grad = np.zeros_like(a.data)
-
-        a.grad += (
+        grad_a = (
             out.grad
             / (2.0 * out.data)
         )
 
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
+
 
 def transpose(
     a: Tensor,
@@ -650,17 +635,18 @@ def transpose(
         if not a.requires_grad:
             return
 
-        if a.grad is None:
-            a.grad = np.zeros_like(a.data)
-
-        a.grad += np.swapaxes(
+        grad_a = np.swapaxes(
             out.grad,
             dim0,
             dim1,
         )
 
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
+
 
 def permute(
     a: Tensor,
@@ -705,16 +691,17 @@ def permute(
         if not a.requires_grad:
             return
 
-        if a.grad is None:
-            a.grad = np.zeros_like(a.data)
-
-        a.grad += np.transpose(
+        grad_a = np.transpose(
             out.grad,
             axes=inverse_dims,
         )
 
+        a._accumulate_grad(grad_a)
+
     out._backward = _backward
+
     return out
+
 
 def native_linear(
     x: Tensor,
@@ -788,7 +775,6 @@ def native_linear(
         weight,
         bias,
     )
-
     out._op = "native_linear"
 
     def _backward() -> None:
@@ -804,28 +790,17 @@ def native_linear(
         )
 
         if x.requires_grad:
-            if x.grad is None:
-                x.grad = np.zeros_like(
-                    x.data
-                )
-
-            x.grad += grad_x
+            x._accumulate_grad(grad_x)
 
         if weight.requires_grad:
-            if weight.grad is None:
-                weight.grad = np.zeros_like(
-                    weight.data
-                )
-
-            weight.grad += grad_weight
+            weight._accumulate_grad(
+                grad_weight
+            )
 
         if bias.requires_grad:
-            if bias.grad is None:
-                bias.grad = np.zeros_like(
-                    bias.data
-                )
-
-            bias.grad += grad_bias
+            bias._accumulate_grad(
+                grad_bias
+            )
 
     out._backward = _backward
 

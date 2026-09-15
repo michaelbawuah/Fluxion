@@ -37,46 +37,23 @@ class Linear(Module):
             if bias
             else None
         )
-    def forward(
-    self,
-    x: Tensor,
-) -> Tensor:
-     from fluxion.ops import native_linear
+    def forward(self, x: Tensor) -> Tensor:
+        if x.ndim < 2:
+            raise ValueError(
+                "Linear expects an input with at least 2 dimensions."
+            )
 
-     if x.ndim < 2:
-        raise ValueError(
-            "NativeLinear expects an input with at least 2 dimensions."
-        )
+        if x.shape[-1] != self.weight.shape[0]:
+            raise ValueError(
+                "Input feature dimension does not match Linear."
+            )
 
-     if x.shape[-1] != self.weight.shape[0]:
-        raise ValueError(
-            "Input feature dimension does not match NativeLinear."
-        )
+        output = x @ self.weight
 
-     if x.ndim == 2:
-        return native_linear(
-            x,
-            self.weight,
-            self.bias,
-        )
+        if self.bias is not None:
+            output = output + self.bias
 
-     original_shape = x.shape
-
-     flattened = x.reshape(
-        -1,
-      original_shape[-1],
-    )
-
-     output = native_linear(
-        flattened,
-        self.weight,
-        self.bias,
-    )
-
-     return output.reshape(
-        *original_shape[:-1],
-        self.weight.shape[1],
-    )
+        return output
 
 
 class ReLU(Module):
@@ -96,12 +73,15 @@ class ReLU(Module):
                 return
 
             if x.requires_grad:
-                if x.grad is None:
-                    x.grad = np.zeros_like(x.data)
+                grad_x = (
+                    (x.data > 0.0)
+                    * out.grad
+                )
 
-                x.grad += (x.data > 0.0) * out.grad
+                x._accumulate_grad(grad_x)
 
         out._backward = _backward
+
         return out
 
 class Sigmoid(Module):
