@@ -1655,3 +1655,43 @@ def test_native_linear_matches_linear_forward_and_backward():
         regular.bias.grad,
         native.bias.grad,
     )
+
+def test_gpt_matches_pytorch_end_to_end():
+    """End-to-end GPT logits and parameter gradients match a PyTorch reference."""
+    from validation.validate_pytorch import compare_mapping, error_stats, torch_gpt
+
+    np.random.seed(1234)
+    model = GPT(
+        vocab_size=13,
+        max_sequence_length=6,
+        embed_dim=8,
+        num_heads=2,
+        hidden_dim=16,
+        num_layers=2,
+    )
+    token_ids = np.random.randint(0, 13, size=(2, 5))
+    fluxion_logits = model(token_ids)
+    upstream = np.random.randn(*fluxion_logits.shape)
+    (fluxion_logits * Tensor(upstream)).sum().backward()
+
+    mapping = {}
+    torch_logits = torch_gpt(token_ids, model, mapping)
+    (torch_logits * torch.tensor(upstream, dtype=torch.float64)).sum().backward()
+
+    np.testing.assert_allclose(
+        fluxion_logits.data,
+        torch_logits.detach().numpy(),
+        rtol=1e-6,
+        atol=1e-7,
+    )
+
+    for name, (fluxion_parameter, torch_parameter) in mapping.items():
+        assert fluxion_parameter.grad is not None, name
+        assert torch_parameter.grad is not None, name
+        np.testing.assert_allclose(
+            fluxion_parameter.grad,
+            torch_parameter.grad.detach().numpy(),
+            rtol=1e-6,
+            atol=1e-7,
+            err_msg=name,
+        )
