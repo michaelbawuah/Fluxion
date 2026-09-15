@@ -805,3 +805,44 @@ def native_linear(
     out._backward = _backward
 
     return out
+
+def cuda_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+    """Fused Linear operation backed by Fluxion's optional CUDA extension."""
+    try:
+        import fluxion_cuda
+    except ImportError as exc:
+        raise RuntimeError(
+            "Fluxion CUDA extension is not available. "
+            "Build it with: python native/cuda/build_cuda.py"
+        ) from exc
+
+    if x.ndim != 2 or weight.ndim != 2 or bias.ndim != 1:
+        raise ValueError("cuda_linear expects 2D x, 2D weight, and 1D bias.")
+    if x.shape[1] != weight.shape[0]:
+        raise ValueError("x and weight dimensions are incompatible.")
+    if bias.shape[0] != weight.shape[1]:
+        raise ValueError("bias size must match output dimension.")
+
+    output_data = fluxion_cuda.linear_forward(x.data, weight.data, bias.data)
+    out = Tensor(
+        output_data,
+        requires_grad=x.requires_grad or weight.requires_grad or bias.requires_grad,
+    )
+    out._prev = (x, weight, bias)
+    out._op = "cuda_linear"
+
+    def _backward() -> None:
+        if out.grad is None:
+            return
+        grad_x, grad_weight, grad_bias = fluxion_cuda.linear_backward(
+            out.grad, x.data, weight.data
+        )
+        if x.requires_grad:
+            x._accumulate_grad(grad_x)
+        if weight.requires_grad:
+            weight._accumulate_grad(grad_weight)
+        if bias.requires_grad:
+            bias._accumulate_grad(grad_bias)
+
+    out._backward = _backward
+    return out

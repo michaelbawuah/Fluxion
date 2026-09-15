@@ -204,7 +204,9 @@ A future portability step will separate the backend interface from the platform 
 
 **Completed:** tensor engine, reverse-mode autograd, neural-network modules, optimizers, attention/Transformer/GPT, PyTorch numerical validation, profiling, gradient-accumulation optimization, native C++ Linear acceleration, and CPU benchmark matrix.
 
-**Next:** portable Linux native backend and reproducible machine metadata, followed by NVIDIA/CUDA kernels, GPU correctness validation, profiling, and CPU/GPU comparisons against PyTorch.
+**Completed:** portable Linux native backend and reproducible backend metadata.
+
+**Next:** NVIDIA/CUDA kernel validation, GPU profiling, and CPU/GPU comparisons against PyTorch.
 
 Longer-term work may include improved dtype/device abstractions, additional fused kernels, better native build tooling, and more extensive benchmark workloads.
 
@@ -265,3 +267,30 @@ PYTHONPATH=. python -m pytest -q
 ```
 
 This portability layer is intentionally completed before CUDA work so CPU and GPU backends can share a stable Python-facing boundary while retaining platform-specific implementations underneath.
+
+
+## Experimental CUDA backend (Milestone C)
+
+Fluxion now contains an optional CUDA backend whose first target is the fused Linear operation. The initial kernel is intentionally simple and first-principles: CUDA threads compute Linear forward, input gradients, weight gradients, and bias gradients directly rather than delegating the math to PyTorch.
+
+```text
+Fluxion Python/autograd
+        |
+        +-- NumPy reference
+        +-- native CPU -> Accelerate / OpenBLAS
+        +-- CUDA -> custom CUDA kernels
+```
+
+The first CUDA implementation accepts NumPy arrays through pybind11, transfers them to the GPU, launches custom kernels, and copies results back. This makes it a correctness and systems baseline, **not yet an optimized GPU tensor runtime**: allocation and host/device transfer overhead are deliberately visible in the end-to-end benchmark. A later optimization stage can introduce persistent device-resident tensors and optimized/fused kernels.
+
+On an NVIDIA Linux machine with the CUDA Toolkit and `nvcc` available:
+
+```bash
+python -m pip install pybind11
+python native/build_native.py
+python native/cuda/build_cuda.py
+PYTHONPATH=. python -m pytest tests/test_cuda_backend.py -q
+PYTHONPATH=. python benchmarks/benchmark_cuda_linear.py
+```
+
+CUDA remains optional. CPU-only macOS and Linux installations continue to work, and CUDA tests skip automatically when the extension/GPU is unavailable.
