@@ -14,6 +14,9 @@ def _sum_to_shape(
     of the original tensor.
     """
 
+    # Broadcasting can prepend dimensions and can expand singleton
+    # dimensions. Reverse both effects so the gradient matches the operand
+    # that participated in the forward operation.
     while gradient.ndim > len(shape):
         gradient = gradient.sum(axis=0)
 
@@ -84,6 +87,8 @@ def multiply(a: Tensor, b: Tensor) -> Tensor:
         if a.requires_grad:
             grad_a = b.data * out.grad
 
+            # Batched matmul may broadcast leading dimensions, so collapse
+            # any broadcasted gradient axes before accumulating into a.
             a._accumulate_grad(
                 _sum_to_shape(
                     grad_a,
@@ -536,6 +541,9 @@ def getitem(a: Tensor, index) -> Tensor:
 
         grad_a = np.zeros_like(a.data)
 
+        # np.add.at performs scatter-add rather than assignment. This is
+        # essential when an index appears more than once (as in embeddings),
+        # because every lookup must contribute to the source gradient.
         np.add.at(
             grad_a,
             index,
@@ -807,7 +815,15 @@ def native_linear(
     return out
 
 def cuda_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
-    """Fused Linear operation backed by Fluxion's optional CUDA extension."""
+    """
+    Linear operation backed by Fluxion's experimental CUDA extension.
+
+    This first CUDA path is intentionally an end-to-end correctness baseline:
+    the extension copies NumPy arrays to the device, allocates device buffers
+    per call, launches custom kernels, and copies results back to the host.
+    Later milestones can optimize residency, allocation reuse, and kernels
+    without changing the autograd-facing operation contract.
+    """
     try:
         import fluxion_cuda
     except ImportError as exc:

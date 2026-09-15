@@ -97,6 +97,8 @@ class Softmax(Module):
         self.axis = axis
 
     def forward(self, x: Tensor) -> Tensor:
+        # Subtracting the maximum leaves softmax probabilities unchanged while
+        # preventing large logits from overflowing during exponentiation.
         shifted = x - x.max(
             axis=self.axis,
             keepdims=True,
@@ -149,6 +151,8 @@ class LayerNorm(Module):
                 "normalized_shape."
             )
 
+        # LayerNorm normalizes each token independently across its final
+        # feature dimension, then applies learnable scale and bias parameters.
         mean = x.mean(
             axis=-1,
             keepdims=True,

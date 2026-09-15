@@ -1,3 +1,5 @@
+// Keep one pybind11 API while selecting the platform BLAS implementation at
+// compile time: Apple Accelerate on macOS, CBLAS/OpenBLAS on Linux.
 #ifdef __APPLE__
 #define ACCELERATE_NEW_LAPACK
 #define ACCELERATE_LAPACK_ILP64
@@ -66,6 +68,8 @@ py::array_t<double> linear_forward(Array x, Array weight, Array bias) {
     const double* bias_ptr = static_cast<const double*>(bias_info.ptr);
     double* output_ptr = static_cast<double*>(output_info.ptr);
 
+    // Delegate the O(batch * input_dim * output_dim) matrix product to the
+    // platform's optimized BLAS rather than reimplementing GEMM in C++.
     cblas_dgemm(
         CblasRowMajor, CblasNoTrans, CblasNoTrans,
         batch_size, output_dim, input_dim,

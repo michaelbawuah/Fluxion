@@ -74,6 +74,9 @@ class Tensor:
                 f"tensor shape {self.data.shape}."
             )
 
+        # Copy-on-first-write avoids allocating and zero-filling a gradient
+        # buffer before the tensor receives its first contribution. Shared
+        # graph paths still accumulate later contributions in place.
         if self.grad is None:
             self.grad = gradient.copy()
         else:
@@ -112,6 +115,9 @@ class Tensor:
 
         self.grad = initial_grad
 
+        # topological_sort() returns leaves -> root. Backpropagation must run
+        # root -> leaves so a node has received all downstream contributions
+        # before its local backward rule propagates gradients to its parents.
         graph = topological_sort(self)
 
         for tensor in reversed(graph):

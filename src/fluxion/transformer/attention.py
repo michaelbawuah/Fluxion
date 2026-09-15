@@ -64,6 +64,8 @@ class ScaledDotProductAttention(Module):
             @ key.transpose(-1, -2)
         )
 
+        # Dot products grow in magnitude with head width; scaling by sqrt(d_k)
+        # keeps logits in a range where softmax gradients remain well behaved.
         scores = scores / math.sqrt(d_k)
 
         if self.causal:
@@ -76,6 +78,8 @@ class ScaledDotProductAttention(Module):
                     "query and key sequence lengths."
                 )
 
+            # -inf above the diagonal makes future-token probabilities exactly
+            # zero after softmax, preserving autoregressive causality.
             causal_mask = np.triu(
                 np.full(
                     (
@@ -166,6 +170,8 @@ class MultiHeadAttention(Module):
     ) -> Tensor:
         batch_size, sequence_length, _ = x.shape
 
+        # (B, T, C) -> (B, H, T, D), allowing each head to attend over the
+        # sequence independently while preserving the total embedding width.
         x = x.reshape(
             batch_size,
             sequence_length,

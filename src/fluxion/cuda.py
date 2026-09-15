@@ -16,6 +16,7 @@ def _extension():
 
 
 def is_available() -> bool:
+    """Return True only when the extension imports and sees a CUDA GPU."""
     try:
         module = importlib.import_module("fluxion_cuda")
     except ImportError:
@@ -27,8 +28,10 @@ def is_available() -> bool:
 
 
 def device_name() -> str:
+    """Return the name of the CUDA device selected by the extension."""
     return str(_extension().device_name())
 
 
 def build_info() -> dict:
+    """Return metadata for the compiled experimental CUDA backend."""
     return dict(_extension().build_info())

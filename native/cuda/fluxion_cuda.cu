@@ -15,6 +15,9 @@ using Array = py::array_t<double, py::array::c_style | py::array::forcecast>;
     if (error != cudaSuccess) throw std::runtime_error(cudaGetErrorString(error)); \
 } while (0)
 
+// Baseline kernel mapping: one CUDA thread owns one output element. This is
+// intentionally simple and easy to validate before introducing shared-memory
+// tiling or a device-resident Tensor abstraction.
 __global__ void linear_forward_kernel(const double* x, const double* w, const double* b,
                                       double* y, int batch, int in_dim, int out_dim) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -84,6 +87,9 @@ py::dict build_info() {
 }
 
 py::array_t<double> linear_forward(Array x, Array weight, Array bias) {
+    // NumPy owns host memory, so this baseline allocates device buffers and
+    // performs host->device->host transfers on every call. Benchmarks therefore
+    // report end-to-end CUDA cost rather than kernel-only execution time.
     auto xi=x.request(), wi=weight.request(), bi=bias.request();
     if (xi.ndim != 2 || wi.ndim != 2 || bi.ndim != 1) throw std::runtime_error("linear_forward expects 2D x, 2D weight, and 1D bias");
     int batch=(int)xi.shape[0], in_dim=(int)xi.shape[1], out_dim=(int)wi.shape[1];
@@ -102,6 +108,8 @@ py::array_t<double> linear_forward(Array x, Array weight, Array bias) {
 }
 
 std::tuple<py::array_t<double>,py::array_t<double>,py::array_t<double>> linear_backward(Array grad, Array x, Array weight) {
+    // Backward mirrors the analytical Linear derivatives with three independent
+    // kernels: dX = G W^T, dW = X^T G, and db = sum_rows(G).
     auto gi=grad.request(), xi=x.request(), wi=weight.request();
     if (gi.ndim != 2 || xi.ndim != 2 || wi.ndim != 2) throw std::runtime_error("linear_backward expects 2D arrays");
     int batch=(int)xi.shape[0], in_dim=(int)xi.shape[1], out_dim=(int)wi.shape[1];

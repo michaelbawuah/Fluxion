@@ -132,7 +132,9 @@ class TransformerBlock(Module):
                 "(batch, sequence, embed_dim)."
             )
 
-        # Attention sublayer
+        # Pre-norm residual block: normalize before each sublayer, then add the
+        # sublayer output back to the residual stream. This keeps the main
+        # information path explicit and mirrors the GPT-style block structure.
         normalized = self.norm1(x)
 
         attended = self.attention(

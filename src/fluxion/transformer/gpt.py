@@ -123,6 +123,8 @@ class GPT(Module):
             sequence_length
         )
 
+        # Token embeddings encode *what* each token is; positional embeddings
+        # encode *where* it occurs. Their sum is the Transformer input stream.
         x = (
             token_embeddings
             + position_embeddings
@@ -133,6 +135,8 @@ class GPT(Module):
 
         x = self.final_norm(x)
 
+        # Produce one unnormalized vocabulary score (logit) per token position.
+        # Cross-entropy turns these logits into the next-token training signal.
         logits = self.output_projection(
             x
         )
