@@ -1,0 +1,76 @@
+{
+  "source_sha": "8febc2c1e69a3a86777f4246eb66cebe453ff6cb",
+  "recorded_date_utc": "2026-10-04",
+  "test_suite": {
+    "command": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=src python -m pytest -q",
+    "passed": 72,
+    "skipped": 2,
+    "failed": 0,
+    "seconds": 2.05,
+    "skip_reason": "CUDA backend unavailable",
+    "test_files_sha256": {
+      "tests/test_autograd.py": "2cb195cb7c45d7fee377c5cdfd246b19ec26e4c388cc2cb6c8935bc7c973f53e",
+      "tests/test_cuda_backend.py": "357d07c7f6455e84f6a4ca4e68a067ff52f417300e4b258974c56a6ce5447e07",
+      "tests/test_native_backend.py": "824be1bfa4eb3fbfefcd9c46d521d9a152b741c7459116e31ba5762cece2ef3c",
+      "tests/test_nn.py": "81d66897d9be83c1f3d45db9141a634af393fd334a67bcc688096231b3f7a3ea",
+      "tests/test_ops.py": "4ec0adbee14be1f4aa4c8544fb60139cdc5f86aea100029e0c9911f9a31252da",
+      "tests/test_optim.py": "e938afc19dcb2635b02117321e88e7e0370938567cfb7a22f4d1ef77abdba5f3",
+      "tests/test_tensor.py": "2f027c77815f5add263e6196cf9461a669d7e87c6c5eb6738643a70ef96a1e30"
+    }
+  },
+  "pytorch_reference": {
+    "command": "OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=src python -m validation.validate_pytorch",
+    "torch_version": "2.14.1+cpu",
+    "dtype": "float64",
+    "atol": 1e-07,
+    "rtol": 1e-06,
+    "summary_gate": "Each report labels PASS if max absolute output and gradient errors <= ATOL + RTOL; report labels do not control process exit status.",
+    "results": [
+      {
+        "component": "Linear",
+        "max_output_abs": 4.441e-16,
+        "max_gradient_abs": 2.22e-16,
+        "reported_status": "PASS"
+      },
+      {
+        "component": "LayerNorm",
+        "max_output_abs": 4.441e-16,
+        "max_gradient_abs": 8.882e-16,
+        "reported_status": "PASS"
+      },
+      {
+        "component": "Causal attention",
+        "max_output_abs": 2.22e-16,
+        "max_gradient_abs": 4.441e-16,
+        "reported_status": "PASS"
+      },
+      {
+        "component": "TransformerBlock",
+        "max_output_abs": 7.216e-16,
+        "max_gradient_abs": 2.665e-15,
+        "reported_status": "PASS"
+      },
+      {
+        "component": "GPT",
+        "max_output_abs": 2.887e-15,
+        "max_gradient_abs": 4.263e-14,
+        "reported_status": "PASS"
+      }
+    ],
+    "validation_file_sha256": "e50c10db173a8f6349dcd2805eb9322d081a728edd2fccbc54b9295d9161888b"
+  },
+  "native": {
+    "build_script": "native/build_native.py",
+    "compiler": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0",
+    "backend": "cblas",
+    "platform": "linux",
+    "dtype": "float64",
+    "linked_blas": "system libblas.so.3, Ubuntu libblas3 3.12.0-3build1.1 (Netlib BLAS)",
+    "prerequisite_note": "Development headers were unpacked locally from matching libblas-dev package; CPATH/LIBRARY_PATH supplied to unmodified build script. No project source modifications."
+  },
+  "cuda": {
+    "built": false,
+    "tested": false,
+    "measurement_count": 0
+  }
+}
