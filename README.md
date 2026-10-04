@@ -2,11 +2,13 @@
 
 **Build the machinery behind a neural network, then measure where it spends its time.**
 
+**Python · NumPy · C++ / BLAS · experimental CUDA**
+
 Fluxion is a deep learning engine built from first principles: NumPy-backed tensors, a dynamic computation graph, reverse-mode automatic differentiation, trainable neural-network modules, and a small GPT-style language model. The core engine computes its own gradients. PyTorch provides an independent numerical reference for outputs and gradients.
 
 The same codebase connects three levels of systems work: **a tensor's local derivative**, **a complete Transformer training step**, and **the boundary between Python and native kernels**. You can read each part, train a model, and reproduce the measurements below.
 
-[Try it](#try-it) · [How it works](#how-it-works) · [Measured behavior](#measured-behavior) · [Correctness](#correctness) · [Native backends](#native-backends)
+[Try it](#try-it) · [How it works](#how-it-works) · [Measured behavior](#measured-behavior) · [Correctness](#correctness) · [Native backends](#native-backends) · [Visuals and measurements](docs/README.md)
 
 ## How it works
 
