@@ -1,296 +1,150 @@
 # Fluxion
 
-**A deep learning systems engine built from first principles.**
+**Build the machinery behind a neural network, then measure where it spends its time.**
 
-Fluxion is an educational/research deep learning framework that implements tensors, reverse-mode automatic differentiation, neural-network layers, optimizers, transformer components, and a small GPT model without relying on PyTorch for its core execution engine. PyTorch is used as a numerical reference for correctness validation.
+Fluxion is a deep learning engine built from first principles: NumPy-backed tensors, a dynamic computation graph, reverse-mode automatic differentiation, trainable neural-network modules, and a small GPT-style language model. The core engine computes its own gradients. PyTorch provides an independent numerical reference for outputs and gradients.
 
-The project is also a systems-performance study: profile the framework, identify bottlenecks, optimize them, validate correctness after each change, and measure whether the optimization actually improves end-to-end performance.
+The same codebase connects three levels of systems work: **a tensor's local derivative**, **a complete Transformer training step**, and **the boundary between Python and native kernels**. You can read each part, train a model, and reproduce the measurements below.
 
-## Architecture
+[Try it](#try-it) · [How it works](#how-it-works) · [Measured behavior](#measured-behavior) · [Correctness](#correctness) · [Native backends](#native-backends)
 
-```text
-Tensor
-  ↓
-Reverse-mode autograd
-  ↓
-Neural-network modules + losses + optimizers
-  ↓
-Attention + Transformer blocks
-  ↓
-GPT
-  ↓
-PyTorch numerical validation
-  ↓
-Native C++ / Apple Accelerate backend
-  ↓
-Profiling + controlled benchmarking
-  ↓
-CUDA / GPU backend (next)
-```
+## How it works
 
-## Current status
+![Fluxion architecture: modules compose tensor operations, reverse-mode autograd accumulates gradients, and SGD or Adam updates parameters. NumPy is the default execution path; NativeLinear and cuda_linear are explicit optional operators.](docs/media/architecture.png)
 
-- **70 automated tests passing**
-- Reverse-mode autograd with broadcasting, reductions, indexing, reshape, transpose, and batched matrix multiplication
-- Neural-network modules including Linear, ReLU, Sigmoid, Softmax, LayerNorm, and Embedding
-- SGD and Adam optimizers
-- Causal multi-head self-attention, Transformer blocks, and GPT
-- Character-level autoregressive training and generation
-- PyTorch reference validation for forward computations **and gradients**
-- Native C++ Linear forward/backward path using **pybind11 + Apple Accelerate**
-- CPU profiling, controlled A/B optimization experiments, and multi-workload benchmarking
+A `Tensor` holds an array, its parent tensors, and the backward rule for the operation that produced it. Layers compose those operations into models. Calling `loss.backward()` traverses the graph from the output toward its leaves; an optimizer then updates the trainable arrays.
 
-## Correctness: Fluxion vs PyTorch
+| Layer of the system | Implemented behavior | Start reading |
+|---|---|---|
+| Tensor engine | Broadcasting, reductions, indexing, reshape/transpose, batched matrix multiplication | [Tensor](src/fluxion/tensor.py), [operations](src/fluxion/ops.py) |
+| Reverse-mode autograd | Topological traversal, local backward rules, shared-input gradient accumulation | [Traversal](src/fluxion/autograd.py), [gradient tests](tests/test_autograd.py) |
+| Neural networks | Linear, ReLU, Sigmoid, Softmax, LayerNorm, Embedding; MSE and cross-entropy losses | [Layers](src/fluxion/nn/layers.py), [losses](src/fluxion/nn/losses.py) |
+| Training | Recursive parameter discovery, SGD and Adam | [Modules](src/fluxion/nn/module.py), [optimizers](src/fluxion/optim/) |
+| Transformer | Multi-head causal attention, learned positions, pre-norm residual blocks, GPT logits | [Attention](src/fluxion/transformer/attention.py), [GPT](src/fluxion/transformer/gpt.py) |
+| Native operators | Fused Linear forward/backward in C++/BLAS; experimental custom CUDA Linear kernels | [CPU implementation](native/fluxion_native.cpp), [CUDA implementation](native/cuda/fluxion_cuda.cu) |
 
-Fluxion is validated against PyTorch using identical inputs and copied parameters. The current validation suite checks both forward outputs and reverse-mode gradients through increasingly complex components.
-
-| Component | Max output abs. error | Max gradient abs. error | Result |
-|---|---:|---:|:---:|
-| Linear | `0.000e+00` | `0.000e+00` | PASS |
-| LayerNorm | `4.441e-16` | `1.332e-15` | PASS |
-| Causal Attention | `1.110e-16` | `4.441e-16` | PASS |
-| TransformerBlock | `4.441e-16` | `2.665e-15` | PASS |
-| GPT | `1.305e-15` | `4.974e-14` | PASS |
-
-The small absolute discrepancies are consistent with floating-point evaluation-order differences. Relative error can appear larger for gradients whose reference values are extremely close to zero, so the validation reports both absolute and relative error.
-
-Run the validation:
-
-```bash
-PYTHONPATH=. python validation/validate_pytorch.py
-```
-
-## Performance
-
-These are **measured results for the current CPU implementation on Apple Silicon/macOS using float64**. They are workload- and machine-specific, not universal performance claims.
-
-### Autograd gradient accumulation
-
-Profiling identified repeated zero-filled gradient-buffer allocation as a source of overhead. Fluxion changed first-write gradient accumulation from a `zeros_like + add` strategy to **copy-on-first-write**, followed by in-place accumulation.
-
-Controlled 7-trial A/B benchmark:
-
-| Metric | Result |
-|---|---:|
-| Median speedup | **1.125x** |
-| Mean speedup | **1.126x** |
-| Std. deviation | `0.017` |
-| Trial range | `1.100x – 1.161x` |
-
-A `1.125x` speedup corresponds to about **11.1% lower elapsed time** for this benchmarked workload.
-
-```bash
-PYTHONPATH=. python benchmarks/benchmark_autograd_ab.py
-```
-
-### Native C++ Linear in GPT
-
-Fluxion includes a fused native Linear path implemented in C++ and exposed through pybind11. On macOS it uses Apple Accelerate for matrix operations.
-
-After adding a regression test to guarantee that the regular and native Linear paths are actually distinct, a 7-trial GPT training-step benchmark measured:
-
-| Metric | Result |
-|---|---:|
-| Median speedup | **1.050x** |
-| Mean speedup | **1.051x** |
-| Std. deviation | `0.009` |
-| Trial range | `1.041x – 1.067x` |
-
-Tested configuration: batch size 8, sequence length 16, embedding dimension 16, 2 Transformer layers, 20 warmup steps, and 200 measured steps per trial.
-
-```bash
-PYTHONPATH=. python benchmarks/benchmark_gpt_native.py
-```
-
-### CPU training-step matrix
-
-The benchmark matrix compares regular Fluxion, Fluxion with NativeLinear, and PyTorch CPU over multiple workloads.
-
-| Workload | Tokens | Fluxion | Native C++ | PyTorch CPU | Native / Fluxion | PyTorch / Native |
-|---|---:|---:|---:|---:|---:|---:|
-| Small | 64 | 1.204 ms | 1.137 ms | 0.854 ms | **1.059x** | **1.332x** |
-| Medium | 256 | 3.173 ms | 2.931 ms | 1.667 ms | **1.083x** | **1.758x** |
-| Large | 512 | 9.423 ms | 10.106 ms | 5.182 ms | **0.932x** | **1.950x** |
-
-The native Linear path improves the small and medium workloads, but it becomes slower than regular Fluxion in the large workload. This negative result is intentionally reported: accelerating one operator does not remove framework-level costs such as autograd bookkeeping, other tensor operations, attention/normalization work, memory movement, dispatch overhead, and backend/kernel boundaries. PyTorch's advantage also grows with workload size, motivating the next profiling and GPU stages rather than cherry-picking only favorable CPU cases.
-
-```bash
-PYTHONPATH=. python benchmarks/benchmark_cpu_matrix.py
-```
-
-## Benchmark methodology
-
-Performance work follows a simple rule:
-
-> **baseline → profile → optimize → validate correctness → re-benchmark**
-
-Benchmarks use warmup iterations and repeated measured trials. Correctness checks are kept separate from timing, and profiler output is used for hotspot discovery rather than treated as authoritative wall-clock speedup evidence.
-
-One benchmark-integrity bug was caught during development: the regular `Linear` path had accidentally been routed through the native implementation, making an earlier regular-vs-native comparison invalid. The baseline was restored, a regression test was added to guarantee distinct execution paths, and the benchmark was rerun. Only the repaired results are reported above.
-
-## Repository layout
-
-```text
-src/fluxion/
-├── tensor.py              # Tensor object and backward traversal
-├── autograd.py
-├── ops.py                 # Differentiable tensor operations
-├── nn/
-│   ├── module.py
-│   ├── layers.py
-│   └── losses.py
-├── optim/
-│   ├── sgd.py
-│   └── adam.py
-└── transformer/
-    ├── attention.py
-    ├── layers.py
-    └── gpt.py
-
-native/
-└── fluxion_native.cpp     # Native C++ Linear backend
-
-tests/                     # Unit and reference-correctness tests
-validation/                # Fluxion ↔ PyTorch numerical validation
-benchmarks/                # Profiling and controlled performance experiments
-examples/                  # Training / generation examples
-```
-
-## Quick start
-
-Create an environment and install Fluxion in editable mode:
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip
-python -m pip install -e ".[dev,reference]"
-```
-
-Run the complete test suite:
-
-```bash
-PYTHONPATH=. python -m pytest -q
-```
-
-Current checkpoint:
-
-```text
-70 passed
-```
-
-## Native backend
-
-The current native backend is macOS-specific because it uses Apple Accelerate. The extension is compiled locally with Apple Clang, pybind11, and Accelerate.
-
-Example build command:
-
-```bash
-clang++ \
-  -O3 \
-  -Wall \
-  -shared \
-  -std=c++17 \
-  -undefined dynamic_lookup \
-  $(python -m pybind11 --includes) \
-  native/fluxion_native.cpp \
-  -framework Accelerate \
-  -o fluxion_native$(python3-config --extension-suffix)
-```
-
-A future portability step will separate the backend interface from the platform implementation so Linux can use an appropriate BLAS backend before GPU work.
-
-## Roadmap
-
-**Completed:** tensor engine, reverse-mode autograd, neural-network modules, optimizers, attention/Transformer/GPT, PyTorch numerical validation, profiling, gradient-accumulation optimization, native C++ Linear acceleration, and CPU benchmark matrix.
-
-**Completed:** portable Linux native backend and reproducible backend metadata.
-
-**Next:** NVIDIA/CUDA kernel validation, GPU profiling, and CPU/GPU comparisons against PyTorch.
-
-Longer-term work may include improved dtype/device abstractions, additional fused kernels, better native build tooling, and more extensive benchmark workloads.
-
-## Project philosophy
-
-Fluxion is not intended to claim that a small from-scratch framework outperforms PyTorch. The goal is to understand and demonstrate the systems underneath modern deep learning frameworks:
-
-- how reverse-mode autograd constructs and traverses computation graphs,
-- how tensor shapes and broadcasting affect gradient propagation,
-- where Python/framework overhead appears,
-- when native kernels help and when they do not,
-- how to validate a custom implementation against a trusted reference,
-- and how profiling evidence should drive optimization decisions.
-
-The project deliberately preserves negative results and benchmark methodology because understanding **why an optimization fails to improve end-to-end performance** is part of systems engineering.
-
-## Portable CPU backend (Milestone B)
-
-The native extension now has a platform boundary instead of hard-coding Apple Accelerate throughout the implementation:
-
-```text
-Fluxion Python
-      |
-      v
-fluxion_native (pybind11 interface)
-      |
-      +-- macOS -> Apple Accelerate / CBLAS
-      |
-      +-- Linux -> CBLAS (OpenBLAS or system BLAS)
-      |
-      +-- NVIDIA CUDA backend -> next stage
-```
-
-Build the CPU extension with the platform-aware build helper:
-
-```bash
-python -m pip install pybind11
-python native/build_native.py
-```
-
-On macOS the build links Apple Accelerate. On Linux it prefers OpenBLAS when available and otherwise uses the system BLAS library. The compiled extension exposes backend metadata so benchmark logs can identify the implementation being measured:
+### A graph you can inspect in six lines
 
 ```python
-from fluxion.native import backend_name, build_info
+from fluxion.tensor import Tensor
 
-print(backend_name())
-print(build_info())
+x = Tensor(3.0, requires_grad=True)
+y = x * x + x
+y.backward()
+print(y.data.item(), x.grad.item())  # 12.0 7.0
 ```
 
-For Ubuntu/AWS Linux development, install a compiler and OpenBLAS headers before building, for example:
+![Computation graph for y = x times x plus x. At x = 3, the shared input receives gradients 3 and 3 from multiplication and 1 directly from addition, giving x.grad = 7.](docs/media/autograd.png)
+
+The shared `x` is visited once in the topological traversal, but every derivative contribution still adds to its gradient. Fluxion copies the first contribution into the gradient buffer and accumulates later contributions in place. Broadcasting has a complementary rule: gradients reduce back to each input's original shape.
+
+## Measured behavior
+
+### Does the complete training loop learn?
+
+![Measured training loss and learned predictions from Fluxion's seeded tiny-network example.](docs/media/training-progress.png)
+
+The [`train_tiny_network.py`](examples/train_tiny_network.py) example fits `y = 2x` using a `1 → 8 → 1` network, ReLU, mean squared error, and SGD. In the recorded run, loss fell from **0.256 to 7.81 × 10⁻¹³** after 1,000 updates. Predictions for unseen inputs `6, 7, 8, 10` were within `3.57 × 10⁻⁶` of `12, 14, 16, 20`. The figure records the actual forward → loss → backward → update loop; this toy task is a functional check rather than a measure of general model quality.
+
+### How does a GPT training step scale?
+
+![Measured NumPy and NativeLinear GPT training-step latency and throughput across sequence lengths, with repeated-trial variation.](docs/media/sequence-scaling.png)
+
+Longer sequences change the amount of work in attention and throughout the training graph. This experiment measures the **whole CPU training step**: forward pass, cross-entropy, backward pass, and Adam update. It uses synthetic token IDs and targets to study execution cost, rather than language-model quality.
+
+On the recorded Linux host, regular Fluxion's median step time rose from **2.38 ms at 8 tokens per sequence to 29.53 ms at 128**. NativeLinear was slower at every measured length: **2.94 ms** and **37.83 ms** at those endpoints. NumPy used optimized OpenBLAS while the native extension linked the host's Netlib BLAS; the result includes both those backend differences and the full framework overhead. Moving an operator into C++ does not, by itself, establish a speedup.
+
+The figures above use fresh CPU measurements with recorded trial data, environment details, and reproducible commands. See [measurement details and source data](docs/benchmarks/results.md) before comparing machines or backends. CUDA performance is not measured in these figures.
+
+### What happened when Linear moved into C++?
+
+The earlier macOS experiment found that native Linear improved small and medium GPT workloads but **slowed the large workload**: `9.423 ms` for regular Fluxion versus `10.106 ms` with NativeLinear. Replacing one operator leaves attention, normalization, Python graph bookkeeping, allocation, and dispatch costs in the end-to-end path.
+
+Those original figures are preserved in [historical CPU results](docs/benchmarks/historical-results.md), with their original setup and limitations. They are a separate checkpoint from the fresh charts above. The repository also contains a [controlled gradient-accumulation A/B benchmark](benchmarks/benchmark_autograd_ab.py) and [CPU workload matrix](benchmarks/benchmark_cpu_matrix.py).
+
+## Correctness
+
+**Fresh Linux CPU checkpoint: 72 tests passed; 2 CUDA tests skipped.** The native C++/CBLAS extension was built for this run. Five PyTorch reference checks passed: Linear, LayerNorm, causal attention, TransformerBlock, and GPT. The largest recorded output error was `2.887e-15`; the largest gradient error was `4.263e-14`. Scope, versions, and recorded results are linked in the [measurement details](docs/benchmarks/results.md).
+
+The [test suite](tests/) covers tensor operations, broadcasting and reductions, shared graphs, neural-network layers, optimizers, attention, and Transformer composition. The [PyTorch reference validation](validation/validate_pytorch.py) copies inputs and parameters into an independent implementation, then compares both **forward outputs and reverse-mode gradients**. The validation script reports `PASS`/`CHECK`; the test suite supplies assertion-based checks as well.
+
+For the complete suite, install the reference dependencies and build the CPU extension using the [native setup below](#build-the-portable-cpu-extension). Two neural-network tests invoke NativeLinear directly, so an unbuilt native extension is insufficient for the full suite. CUDA tests skip when the extension/GPU is unavailable; a CPU-only run does not validate CUDA.
+
+Reference checks use float64 and report absolute and relative error. Relative error can look large near a zero-valued reference gradient.
+
+## Try it
+
+Requires **Python 3.11 or newer**. From a fresh clone, the NumPy-only demo works without PyTorch or a compiler:
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y build-essential libopenblas-dev python3-dev
-python -m pip install pybind11
-python native/build_native.py
-PYTHONPATH=. python -m pytest -q
+git clone https://github.com/michaelbawuah/Fluxion.git
+cd Fluxion
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+python examples/train_tiny_network.py
 ```
 
-This portability layer is intentionally completed before CUDA work so CPU and GPU backends can share a stable Python-facing boundary while retaining platform-specific implementations underneath.
+The activation command above is for macOS/Linux shells. The Fluxion runtime itself depends on NumPy. PyTorch is an optional dependency used by the tests and reference validation.
 
-
-## Experimental CUDA backend (Milestone C)
-
-Fluxion now contains an optional CUDA backend whose first target is the fused Linear operation. The initial kernel is intentionally simple and first-principles: CUDA threads compute Linear forward, input gradients, weight gradients, and bias gradients directly rather than delegating the math to PyTorch.
-
-```text
-Fluxion Python/autograd
-        |
-        +-- NumPy reference
-        +-- native CPU -> Accelerate / OpenBLAS
-        +-- CUDA -> custom CUDA kernels
-```
-
-The first CUDA implementation accepts NumPy arrays through pybind11, transfers them to the GPU, launches custom kernels, and copies results back. This makes it a correctness and systems baseline, **not yet an optimized GPU tensor runtime**: allocation and host/device transfer overhead are deliberately visible in the end-to-end benchmark. A later optimization stage can introduce persistent device-resident tensors and optimized/fused kernels.
-
-On an NVIDIA Linux machine with the CUDA Toolkit and `nvcc` available:
+For a larger example, [`train_gpt.py`](examples/train_gpt.py) trains a character-level causal model on a short repeated text and samples new characters:
 
 ```bash
-python -m pip install pybind11
+python examples/train_gpt.py
+```
+
+That example demonstrates next-token training and autoregressive generation. Its tiny repeated corpus is a learning exercise, not evidence of broad language understanding.
+
+## Native backends
+
+| Path | Scope | Requirements and current limits |
+|---|---|---|
+| NumPy | Default tensor operations and regular `Linear`; full CPU training examples | Python + NumPy |
+| C++ / BLAS | Explicit `NativeLinear` forward/backward; GPT can opt in with `use_native_linear=True` | C++17 compiler, pybind11, Accelerate on macOS or CBLAS/BLAS development libraries on Linux; float64 |
+| CUDA | Explicit `fluxion.ops.cuda_linear(x, weight, bias)` | NVIDIA GPU, CUDA Toolkit/`nvcc`, pybind11; custom kernels with host/device copies and allocation on each call; float64 |
+
+### Build the portable CPU extension
+
+Run these commands from the repository root. On Linux, install a C++ compiler and the BLAS development headers first; for Ubuntu, the packages are `build-essential`, `libopenblas-dev`, and `python3-dev`. On macOS, install the Xcode command-line tools.
+
+```bash
+python -m pip install -e ".[dev,reference]" pybind11
 python native/build_native.py
+PYTHONPATH=src:. python -m pytest -q
+PYTHONPATH=src:. python validation/validate_pytorch.py
+PYTHONPATH=src:. python benchmarks/benchmark_gpt_native.py
+```
+
+The build helper selects Apple Accelerate on macOS and a BLAS library on Linux. The compiled extension is written to the repository root; `PYTHONPATH=src:.` makes both the Python package and that extension available to script subprocesses.
+
+Inspect the compiled backend before comparing timings:
+
+```bash
+PYTHONPATH=src:. python -c "from fluxion.native import backend_name, build_info; print(backend_name()); print(build_info())"
+```
+
+### Build the experimental CUDA operator
+
+On an NVIDIA CUDA machine after the development/reference install:
+
+```bash
 python native/cuda/build_cuda.py
-PYTHONPATH=. python -m pytest tests/test_cuda_backend.py -q
-PYTHONPATH=. python benchmarks/benchmark_cuda_linear.py
+PYTHONPATH=src:. python -m pytest tests/test_cuda_backend.py -q
+PYTHONPATH=src:. python benchmarks/benchmark_cuda_linear.py
 ```
 
-CUDA remains optional. CPU-only macOS and Linux installations continue to work, and CUDA tests skip automatically when the extension/GPU is unavailable.
+The extension implements Linear forward, input gradients, weight gradients, and bias gradients directly in CUDA. NumPy arrays are copied to the GPU and results are copied back. Persistent device tensors, device-resident GPT training, optimized kernels, and measured GPU comparisons remain future work.
+
+## Reproduce or explore
+
+| Question | Entry point |
+|---|---|
+| Does a small model learn end to end? | [`examples/train_tiny_network.py`](examples/train_tiny_network.py) |
+| How does a Transformer compose the engine? | [`src/fluxion/transformer/gpt.py`](src/fluxion/transformer/gpt.py) |
+| Do outputs and gradients match an independent implementation? | [`validation/validate_pytorch.py`](validation/validate_pytorch.py) |
+| How does sequence length affect a whole training step? | [`benchmarks/benchmark_scaling.py`](benchmarks/benchmark_scaling.py) |
+| Where does the Python CPU path spend its time? | [`benchmarks/profile_gpt.py`](benchmarks/profile_gpt.py) |
+| Does a fused native operator improve the full model? | [`benchmarks/benchmark_gpt_native.py`](benchmarks/benchmark_gpt_native.py), [`benchmark_cpu_matrix.py`](benchmarks/benchmark_cpu_matrix.py) |
+| How are the README figures made? | [Diagram renderer](docs/media/render_diagrams.py), [chart renderer](docs/media/render_charts.py), [measurement details](docs/benchmarks/results.md) |
+
+Fluxion is an educational systems project with readable implementations and explicit experimental boundaries. The next useful work is to profile the measured bottlenecks, improve backend residency and build tooling, expand reference coverage, and rerun complete-workload comparisons after each change.
